@@ -80,23 +80,23 @@ docker compose up
   "weekdays": ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"],
   "rules": [
     {
-      "match": "Morning support",
-      "type": "Ochtenddienst",
+      "match": "matchA",
+      "type": "replaceA",
       "priority": 100,
       "default_start": "08:00",
       "default_end": "16:30"
     },
     {
-      "match": "Internal Issues",
-      "type": "Kantoordag",
+      "match": "matchB",
+      "type": "replaceB",
       "priority": 50,
       "default_start": "09:00",
       "default_end": "17:30"
     }
   ],
   "ignore_rules": [
-    { "match": "[Holiday]" },
-    { "match": "Topdesk Tickets" }
+    { "match": "ignoreC" },
+    { "match": "ignoreD" }
   ]
 }
 ```
