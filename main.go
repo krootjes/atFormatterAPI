@@ -194,7 +194,9 @@ func scheduleHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, simplifyEvents(events))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"data": simplifyEvents(events),
+	})
 }
 
 func todayHandler(w http.ResponseWriter, r *http.Request) {
