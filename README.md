@@ -47,9 +47,8 @@ The service is designed to run in Docker only. It always listens on internal por
 ```yaml
 services:
   atformatterapi:
-    build: .
     container_name: atformatterapi
-    image: atformatterapi
+    image: ghcr.io/krootjes/atformatterapi:latest
     ports:
       - "8080:8080"
     restart: unless-stopped
