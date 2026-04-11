@@ -18,12 +18,11 @@ import (
 )
 
 type Rule struct {
-	Match 		 string `json:"match"`
-	Type  		 string `json:"type"`
-	Priority 	 int    `json:"priority"`
+	Match        string `json:"match"`
+	Type         string `json:"type"`
+	Priority     int    `json:"priority"`
 	DefaultStart string `json:"default_start"`
-	DefaultEnd 	 string `json:"default_end"`
-
+	DefaultEnd   string `json:"default_end"`
 }
 
 type IgnoreRule struct {
@@ -37,11 +36,11 @@ type DefinitiveConfig struct {
 }
 
 type Config struct {
-	APIKey      string       `json:"api_key"`
-	CalendarURL string       `json:"calendar_url"`
-	UserFilter  string       `json:"user_filter"`
-	DaysAhead   int          `json:"days_ahead"`
-	Weekdays    [7]string    `json:"weekdays"`
+	APIKey         string            `json:"api_key"`
+	CalendarURL    string            `json:"calendar_url"`
+	UserFilter     string            `json:"user_filter"`
+	DaysAhead      int               `json:"days_ahead"`
+	Weekdays       [7]string         `json:"weekdays"`
 	Rules          []Rule            `json:"rules"`
 	IgnoreRules    []IgnoreRule      `json:"ignore_rules"`
 	DefinitiveFrom *DefinitiveConfig `json:"definitive_from,omitempty"`
@@ -67,9 +66,9 @@ type SimplifiedEvent struct {
 var cfg Config
 
 var (
-	cacheMutex 	 sync.Mutex
+	cacheMutex   sync.Mutex
 	cachedEvents []RawEvent
-	cacheTime 	 time.Time
+	cacheTime    time.Time
 )
 
 const cacheTTL = 15 * time.Minute
@@ -77,11 +76,11 @@ const cacheTTL = 15 * time.Minute
 func main() {
 	loadConfig()
 
-	http.HandleFunc("/health", 				  authMiddleware(healthHandler))
-	http.HandleFunc("/api/raw",    			  authMiddleware(rawHandler))
-	http.HandleFunc("/api/raw/ics", 		  authMiddleware(rawICSHandler))
-	http.HandleFunc("/api/schedule", 		  authMiddleware(scheduleHandler))
-	http.HandleFunc("/api/schedule/today", 	  authMiddleware(todayHandler))
+	http.HandleFunc("/health", authMiddleware(healthHandler))
+	http.HandleFunc("/api/raw", authMiddleware(rawHandler))
+	http.HandleFunc("/api/raw/ics", authMiddleware(rawICSHandler))
+	http.HandleFunc("/api/schedule", authMiddleware(scheduleHandler))
+	http.HandleFunc("/api/schedule/today", authMiddleware(todayHandler))
 	http.HandleFunc("/api/schedule/tomorrow", authMiddleware(tomorrowHandler))
 
 	log.Printf("Listening on 0.0.0.0:8080 (container internal port)")
@@ -95,18 +94,18 @@ func loadConfig() {
 		UserFilter:  "",
 		DaysAhead:   30,
 		Weekdays:    [7]string{"sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"},
-		Rules: []Rule{
-			{Match: "matchA", Type: "replaceA", Priority: 1, DefaultStart: "08:00", DefaultEnd: "16:00"},
-			{Match: "matchB", Type: "replaceB", Priority: 2, DefaultStart: "08:00", DefaultEnd: "16:00"},
-		},
-		IgnoreRules: []IgnoreRule{
-			{Match: "ignoreA"},
-			{Match: "ignoreB"},
-		},
 		DefinitiveFrom: &DefinitiveConfig{
 			Weekday:  "friday",
 			Time:     "19:00",
 			Timezone: "Europe/Amsterdam",
+		},
+		Rules: []Rule{
+			{Match: "matchA", Type: "replaceA", Priority: 1, DefaultStart: "", DefaultEnd: ""},
+			{Match: "matchB", Type: "replaceB", Priority: 2, DefaultStart: "", DefaultEnd: ""},
+		},
+		IgnoreRules: []IgnoreRule{
+			{Match: "ignoreA"},
+			{Match: "ignoreB"},
 		},
 	}
 
@@ -140,12 +139,12 @@ func loadConfig() {
 		cfg.DaysAhead = 30
 	}
 
-// crash app if calendar URL is not set
+	// crash app if calendar URL is not set
 	if strings.TrimSpace(cfg.CalendarURL) == "" {
 		log.Fatal("calendar_url must be set in config.json")
 	}
 
-	// crash appp if no rules are defined	
+	// crash appp if no rules are defined
 	if len(cfg.Rules) == 0 {
 		log.Fatal("at least one rule must be defined in config.json")
 	}
@@ -155,8 +154,8 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
 		if cfg.APIKey == "" {
-		next.ServeHTTP(w, r)
-		return
+			next.ServeHTTP(w, r)
+			return
 		}
 
 		apiKey := r.Header.Get("X-API-Key")
@@ -171,11 +170,10 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	_, err := getCachedEvents()
 
-
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status": "ok",
+		"status":             "ok",
 		"calendar_reachable": err == nil,
-		"last_fetch": cacheTime.Format(time.RFC3339),
+		"last_fetch":         cacheTime.Format(time.RFC3339),
 	})
 
 }
@@ -376,7 +374,14 @@ func resolveTimes(summary string, rule Rule) (string, string) {
 }
 
 func parseWeekday(s string) time.Weekday {
-	switch strings.ToLower(s) {
+	s = strings.ToLower(s)
+	for i, name := range cfg.Weekdays {
+		if strings.ToLower(name) == s {
+			return time.Weekday(i)
+		}
+	}
+	// fallback to English
+	switch s {
 	case "sunday":    return time.Sunday
 	case "monday":    return time.Monday
 	case "tuesday":   return time.Tuesday
@@ -387,9 +392,10 @@ func parseWeekday(s string) time.Weekday {
 	}
 }
 
-// isDefinitive returns true if the event date falls within the 7-day window
-// that starts the day after the most recent past trigger (weekday + time in
-// the configured timezone). Returns false when definitive_from is not set.
+// isDefinitive returns true if the trigger that publishes the event's week
+// has already occurred. The trigger weekday+time is configured in definitive_from.
+// Each Mon–Sun week has exactly one trigger; the schedule is definitive once
+// that trigger has passed, regardless of which weekday is configured.
 func isDefinitive(eventDate string) bool {
 	dc := cfg.DefinitiveFrom
 	if dc == nil {
@@ -411,22 +417,26 @@ func isDefinitive(eventDate string) bool {
 		return false
 	}
 
-	now := time.Now().In(loc)
-	targetWD := int(parseWeekday(dc.Weekday))
-	daysBack := (int(now.Weekday()) - targetWD + 7) % 7
-
-	// Most recent candidate occurrence of the trigger weekday+time
-	trigger := time.Date(now.Year(), now.Month(), now.Day()-daysBack, hour, minute, 0, 0, loc)
-	if trigger.After(now) {
-		trigger = trigger.AddDate(0, 0, -7)
+	eventTime, err := time.ParseInLocation("2006-01-02", eventDate, loc)
+	if err != nil {
+		return false
 	}
 
-	// Definitive window: Saturday (day after trigger) through following Sunday
-	// e.g. trigger = Friday → window = Sat + Mon–Sun = trigger+1 through trigger+9
-	windowStart := trigger.AddDate(0, 0, 1).Format("2006-01-02")
-	windowEnd   := trigger.AddDate(0, 0, 9).Format("2006-01-02")
+	// Find Monday of the week containing the event date
+	daysFromMonday := (int(eventTime.Weekday()) + 6) % 7 // Mon=0 … Sun=6
+	weekMonday := eventTime.AddDate(0, 0, -daysFromMonday)
 
-	return eventDate >= windowStart && eventDate <= windowEnd
+	// Find the trigger day that publishes this week's schedule
+	targetWD := int(parseWeekday(dc.Weekday))
+	daysBeforeMonday := (1 - targetWD + 7) % 7
+	if daysBeforeMonday == 0 {
+		daysBeforeMonday = 7
+	}
+	triggerDay := weekMonday.AddDate(0, 0, -daysBeforeMonday)
+	trigger := time.Date(triggerDay.Year(), triggerDay.Month(), triggerDay.Day(), hour, minute, 0, 0, loc)
+
+	// Definitive once the trigger has passed
+	return !time.Now().In(loc).Before(trigger)
 }
 
 func simplifyEvents(events []RawEvent) []SimplifiedEvent {
@@ -478,7 +488,6 @@ func simplifyEvents(events []RawEvent) []SimplifiedEvent {
 
 	return out
 }
-
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
