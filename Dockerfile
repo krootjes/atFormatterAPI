@@ -12,6 +12,8 @@ FROM alpine:3.20
 
 LABEL org.opencontainers.image.source=https://github.com/krootjes/ical-formatter-api
 
+RUN apk add --no-cache tzdata
+
 WORKDIR /app
 
 COPY --from=builder /ical-formatter-api /ical-formatter-api

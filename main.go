@@ -9,6 +9,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -29,14 +30,21 @@ type IgnoreRule struct {
 	Match string `json:"match"`
 }
 
+type DefinitiveConfig struct {
+	Weekday  string `json:"weekday"`  // e.g. "friday"
+	Time     string `json:"time"`     // e.g. "19:00"
+	Timezone string `json:"timezone"` // e.g. "Europe/Amsterdam"
+}
+
 type Config struct {
 	APIKey      string       `json:"api_key"`
 	CalendarURL string       `json:"calendar_url"`
 	UserFilter  string       `json:"user_filter"`
 	DaysAhead   int          `json:"days_ahead"`
 	Weekdays    [7]string    `json:"weekdays"`
-	Rules       []Rule       `json:"rules"`
-	IgnoreRules []IgnoreRule `json:"ignore_rules"`
+	Rules          []Rule            `json:"rules"`
+	IgnoreRules    []IgnoreRule      `json:"ignore_rules"`
+	DefinitiveFrom *DefinitiveConfig `json:"definitive_from,omitempty"`
 }
 
 type RawEvent struct {
@@ -53,6 +61,7 @@ type SimplifiedEvent struct {
 	Start     string `json:"start"`
 	End       string `json:"end"`
 	Summary   string `json:"summary"`
+	IsDef     bool   `json:"is_def"`
 }
 
 var cfg Config
@@ -360,6 +369,60 @@ func resolveTimes(summary string, rule Rule) (string, string) {
 	return rule.DefaultStart, rule.DefaultEnd
 }
 
+func parseWeekday(s string) time.Weekday {
+	switch strings.ToLower(s) {
+	case "sunday":    return time.Sunday
+	case "monday":    return time.Monday
+	case "tuesday":   return time.Tuesday
+	case "wednesday": return time.Wednesday
+	case "thursday":  return time.Thursday
+	case "saturday":  return time.Saturday
+	default:          return time.Friday
+	}
+}
+
+// isDefinitive returns true if the event date falls within the 7-day window
+// that starts the day after the most recent past trigger (weekday + time in
+// the configured timezone). Returns false when definitive_from is not set.
+func isDefinitive(eventDate string) bool {
+	dc := cfg.DefinitiveFrom
+	if dc == nil {
+		return false
+	}
+
+	loc, err := time.LoadLocation(dc.Timezone)
+	if err != nil {
+		return false
+	}
+
+	parts := strings.SplitN(dc.Time, ":", 2)
+	if len(parts) != 2 {
+		return false
+	}
+	hour, err1 := strconv.Atoi(parts[0])
+	minute, err2 := strconv.Atoi(parts[1])
+	if err1 != nil || err2 != nil {
+		return false
+	}
+
+	now := time.Now().In(loc)
+	targetWD := int(parseWeekday(dc.Weekday))
+	daysBack := (int(now.Weekday()) - targetWD + 7) % 7
+
+	// Most recent candidate occurrence of the trigger weekday+time
+	trigger := time.Date(now.Year(), now.Month(), now.Day()-daysBack, hour, minute, 0, 0, loc)
+	if trigger.After(now) {
+		trigger = trigger.AddDate(0, 0, -7)
+	}
+
+	// Definitive window: Saturday (day after trigger) through following Sunday
+	// e.g. trigger = Friday → window = Sat + Mon–Sun = trigger+1 through trigger+9
+	windowStart := trigger.AddDate(0, 0, 1).Format("2006-01-02")
+	windowEnd   := trigger.AddDate(0, 0, 9).Format("2006-01-02")
+
+	return eventDate >= windowStart && eventDate <= windowEnd
+}
+
 func simplifyEvents(events []RawEvent) []SimplifiedEvent {
 	type candidate struct {
 		event RawEvent
@@ -403,6 +466,7 @@ func simplifyEvents(events []RawEvent) []SimplifiedEvent {
 			Start:     start,
 			End:       end,
 			Summary:   fmt.Sprintf("%s %s-%s", c.rule.Type, start, end),
+			IsDef:     isDefinitive(date),
 		})
 	}
 
