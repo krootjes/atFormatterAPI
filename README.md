@@ -34,9 +34,12 @@ Results are cached in memory for 15 minutes to avoid hammering the calendar sour
   "type": "Kantoordag",
   "start": "09:00",
   "end": "17:30",
-  "summary": "Kantoordag 09:00-17:30"
+  "summary": "Kantoordag 09:00-17:30",
+  "is_def": true
 }
 ```
+
+The `is_def` field is `true` once the configured trigger (e.g. Friday evening) for that week has passed, indicating the schedule is definitive rather than provisional.
 
 ## Deployment
 
@@ -78,6 +81,11 @@ docker compose up
   "user_filter": "Your Name",
   "days_ahead": 30,
   "weekdays": ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"],
+  "definitive_from": {
+    "weekday": "friday",
+    "time": "19:00",
+    "timezone": "Europe/Amsterdam"
+  },
   "rules": [
     {
       "match": "matchA",
@@ -109,9 +117,22 @@ docker compose up
 | `calendar_url` | Required. ICS URL to fetch |
 | `user_filter` | Optional. Only process events whose summary contains this string |
 | `days_ahead` | How many days ahead to include (default: 30) |
-| `weekdays` | Weekday names used in output (index 0 = Sunday) |
+| `weekdays` | Weekday display names in output (index 0 = Sunday, supports any language) |
+| `definitive_from` | Optional. Trigger that marks a week's schedule as definitive (see below) |
 | `rules` | List of classification rules (see below) |
 | `ignore_rules` | List of patterns to discard before classification |
+
+### `definitive_from`
+
+Configures when a week's schedule becomes definitive. Each Mon–Sun week has exactly one trigger; once the configured weekday + time has passed, all events in that week get `is_def: true`.
+
+| Field | Description |
+|-------|-------------|
+| `weekday` | Weekday of the trigger (matches against your `weekdays` array or English fallback) |
+| `time` | Time of day the trigger fires, e.g. `"19:00"` |
+| `timezone` | IANA timezone for the trigger, e.g. `"Europe/Amsterdam"` |
+
+Omit `definitive_from` entirely to always get `is_def: false`.
 
 ### Rules
 
@@ -179,21 +200,18 @@ To manually refresh the sensor without waiting for `scan_interval`, go to **Deve
 
 Requires the [html-template-card](https://github.com/PiotrMachowski/Home-Assistant-Lovelace-HTML-Jinja2-Template-card) custom card.
 
-Entries from the current week are highlighted green (confirmed), entries from future weeks are highlighted yellow (subject to change).
+Entries with `is_def: true` are highlighted green (definitive), others yellow (provisional). The `is_def` value comes directly from the API — no date logic in the frontend.
 
 ```yaml
 type: custom:html-template-card
-title: Werkplanning
+title: Werkplanning Daan
 ignore_line_breaks: true
-content: |
+content: >
   {% set items = state_attr('sensor.werkplanning', 'data') or [] %}
-  {% set today = now().date() %}
-  {% set week_start = today - timedelta(days=today.weekday()) %}
-  {% set week_end = week_start + timedelta(days=6) %}
   <div style="margin-bottom:10px;display:flex;gap:16px;font-size:0.85em;opacity:0.8;">
     <div style="display:flex;align-items:center;gap:6px;">
       <div style="width:12px;height:12px;border-radius:3px;background:rgba(0,200,100,0.4);"></div>
-      <span>Definitief (deze week)</span>
+      <span>Definitief</span>
     </div>
     <div style="display:flex;align-items:center;gap:6px;">
       <div style="width:12px;height:12px;border-radius:3px;background:rgba(255,200,0,0.4);"></div>
@@ -211,8 +229,7 @@ content: |
     </thead>
     <tbody>
       {% for i in items %}
-        {% set d = strptime(i.date, '%Y-%m-%d').date() %}
-        {% if week_start <= d <= week_end %}
+        {% if i.is_def %}
           {% set bg = 'background:rgba(0,200,100,0.15);' %}
         {% else %}
           {% set bg = 'background:rgba(255,200,0,0.15);' %}
